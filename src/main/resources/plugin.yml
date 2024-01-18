@@ -1,0 +1,11 @@
+name: Spleef
+version: '${project.version}'
+main: spleef.spleef.Spleef
+api-version: 1.16
+authors: [ Steyn91, _Siegward_ ]
+description: Spleef plugin by LampTeam
+commands:
+  spleef:
+    description: Base plugin comand. Also shows help page
+  spleefadmin:
+    description: Admin command to create/modify arenas

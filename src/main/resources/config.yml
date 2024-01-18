@@ -1,0 +1,37 @@
+name: "test"
+minPLayers: 2
+maxPlayers: 4
+startLocations:
+  1:
+    ==: org.bukkit.Location
+    world: world
+    x: 0
+    y: 18.0
+    z: 0
+    pitch: 0
+    yaw: 0
+hubLocation:
+  ==: org.bukkit.Location
+  world: world
+  x: 0
+  y: 18.0
+  z: 0
+  pitch: 0
+  yaw: 0
+lobbyLocation:
+  ==: org.bukkit.Location
+  world: world
+  x: 0
+  y: 18.0
+  z: 0
+  pitch: 0
+  yaw: 0
+minY: 0
+floors:
+  1:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
