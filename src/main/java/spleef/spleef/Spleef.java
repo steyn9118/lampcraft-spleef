@@ -7,7 +7,9 @@ import org.bukkit.plugin.java.JavaPlugin;
 import spleef.spleef.commands.spleefCommand;
 import spleef.spleef.commands.spleefAdminCommand;
 import spleef.spleef.listeners.playerListeners;
+import spleef.spleef.stats.Database;
 import spleef.spleef.stats.PlaceholderManager;
+import spleef.spleef.stats.StatsManager;
 
 import java.io.File;
 import java.util.ArrayList;
@@ -40,6 +42,9 @@ public final class Spleef extends JavaPlugin {
         saveDefaultConfig();
         new PlaceholderManager().register();
 
+        Database.initDatabase();
+        StatsManager.startSavingCycle();
+
         LoadArenasFromConfig();
     }
 
@@ -61,7 +66,7 @@ public final class Spleef extends JavaPlugin {
             YamlConfiguration configuration = YamlConfiguration.loadConfiguration(file);
 
             // Стартовые места
-            List<Location> startLocations = (ArrayList<Location>) new ArrayList();
+            List<Location> startLocations = new ArrayList();
             for (String key : configuration.getConfigurationSection("startLocations").getKeys(false)){
                 startLocations.add(configuration.getLocation("startLocations." + key));
             }

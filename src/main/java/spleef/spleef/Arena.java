@@ -7,6 +7,7 @@ import net.kyori.adventure.title.Title;
 import org.bukkit.*;
 import org.bukkit.enchantments.Enchantment;
 import org.bukkit.entity.Player;
+import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.potion.PotionEffect;
@@ -92,7 +93,7 @@ public class Arena {
         }
 
         boosterProgress.put(player, 0);
-        boosterBossbars.put(player, BossBar.bossBar(Component.text("Блоков до следующего бустера: ").color(NamedTextColor.YELLOW), 0, BossBar.Color.YELLOW, BossBar.Overlay.PROGRESS));
+        boosterBossbars.put(player, BossBar.bossBar(Component.text("Блоков до следующего бустера: ").color(NamedTextColor.YELLOW), 0f, BossBar.Color.YELLOW, BossBar.Overlay.PROGRESS));
         players.add(player);
         player.sendMessage(arenaJoin);
         player.teleport(lobbyLocation);
@@ -114,6 +115,7 @@ public class Arena {
     }
 
     public void death(Player player){
+        if (!players.contains(player)) return;
         boosterProgress.remove(player);
         boosterBossbars.remove(player);
         player.sendMessage(loseMessage);
@@ -165,9 +167,13 @@ public class Arena {
         timesCleared = 0;
         gameActive = true;
         int playersTeleported = 0;
-        for (Location loc : startLocations) {
-            players.get(playersTeleported).teleport(loc);
-            playersTeleported++;
+        for (Player player : players) {
+            player.teleport(startLocations.get(playersTeleported));
+            player.setGameMode(GameMode.SURVIVAL);
+            player.showBossBar(boosterBossbars.get(player));
+            StatsManager.updateGames(player.getName());
+            player.showTitle(Title.title(startGameTitle, startGameSubtitle));
+            if (startLocations.size() != 1) playersTeleported++;
         }
 
         // Лопаты
@@ -175,12 +181,11 @@ public class Arena {
         shovel.addEnchantment(Enchantment.DIG_SPEED, 5);
         ItemMeta meta = shovel.getItemMeta();
         meta.setUnbreakable(true);
+        meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES);
+        meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
         shovel.setItemMeta(meta);
         for (Player player : players){
-            StatsManager.updateGames(player.getName());
             player.getInventory().setItemInMainHand(shovel);
-            player.showTitle(Title.title(startGameTitle, startGameSubtitle));
-            player.setGameMode(GameMode.SURVIVAL);
         }
 
         BukkitRunnable gameCountdown = new BukkitRunnable() {
@@ -267,7 +272,7 @@ public class Arena {
         StatsManager.updateBlocksBroken(player.getName());
 
         boosterBossbars.replace(player, BossBar.bossBar(Component.text("Блоков до следующего бустера: " + boosterProgress.get(player)).color(NamedTextColor.YELLOW),
-                boosterProgress.get(player) + 1, BossBar.Color.YELLOW, BossBar.Overlay.PROGRESS));
+                (float) (boosterProgress.get(player) + 1) / blocksForBooster, BossBar.Color.YELLOW, BossBar.Overlay.PROGRESS));
 
         if (boosterProgress.get(player) + 1 == blocksForBooster){
             boosterProgress.replace(player, 0);
