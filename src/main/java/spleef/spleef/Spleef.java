@@ -63,7 +63,6 @@ public final class Spleef extends JavaPlugin {
         }
 
         for (File file : arenasFiles){
-
             YamlConfiguration configuration = YamlConfiguration.loadConfiguration(file);
 
             List<Location> startLocations = new ArrayList();
