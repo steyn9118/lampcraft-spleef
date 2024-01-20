@@ -13,6 +13,7 @@ import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.util.BoundingBox;
 import spleef.spleef.stats.StatsManager;
 
 import java.util.ArrayList;
@@ -32,14 +33,18 @@ public class Arena {
     private final List<Location> startLocations;
     private final Location lobbyLocation;
     private final Location hubLocation;
+    private final Location spectatorsSpawnLocation;
     private final int minY;
-    private final List<int[]> floors;
+    private final List<int[]> snowLayers;
     private final int blocksForBooster;
+    private final BoundingBox spectatorsArea;
 
     // Технические
     private final HashMap<Player, BossBar> boosterBossbars = new HashMap<>();
+    private final BossBar lobbyBossbar = BossBar.bossBar(Component.text("Ждём игроков...").color(NamedTextColor.WHITE), 1f, BossBar.Color.WHITE, BossBar.Overlay.PROGRESS);
     private final Spleef plugin = Spleef.getPlugin();
     private final List<Player> players = new ArrayList<>();
+    private final List<Player> alive = new ArrayList<>();
     private final List<Player> spectators = new ArrayList<>();
     private final HashMap<Player, Integer> boosterProgress = new HashMap<>();
     private final Component arenaFull = Component.text("Арена заполнена или игра уже идёт, поэтому вы были присоединены как наблюдатель").color(NamedTextColor.RED);
@@ -52,10 +57,9 @@ public class Arena {
 
     // Динамические
     private boolean gameActive;
-    private boolean timerStarted;
+    private boolean lobbyTimerStarted;
     private int timesCleared;
 
-    // Геттеры
     public List<Player> getPlayers(){
         return players;
     }
@@ -65,9 +69,23 @@ public class Arena {
     public String getID(){
         return ID;
     }
+    public boolean isGameActive(){
+        return gameActive;
+    }
+    public Location getSpectatorsSpawnLocation(){
+        return spectatorsSpawnLocation;
+    }
+    public BoundingBox getSpectatorsArea(){
+        return spectatorsArea;
+    }
+    public List<Player> getSpectators(){
+        return spectators;
+    }
+
+
 
     public Arena(String ID, String name, int maxGameLength, int lobbyTimer, int maxPlayers, int minPlayers, List<Location> startLocations,
-                 Location lobbyLocation, Location hubLocation, int minY, List<int[]> floors, int blocksForBooster) {
+                 Location lobbyLocation, Location hubLocation, Location spectatorsSpawnLocation, int minY, List<int[]> snowLayers, int blocksForBooster, BoundingBox spectatorsArea) {
         this.ID = ID;
         this.maxGameLength = maxGameLength;
         this.lobbyTimer = lobbyTimer;
@@ -76,15 +94,19 @@ public class Arena {
         this.startLocations = startLocations;
         this.lobbyLocation = lobbyLocation;
         this.hubLocation = hubLocation;
+        this.spectatorsSpawnLocation = spectatorsSpawnLocation;
         this.minY = minY;
-        this.floors = floors;
+        this.snowLayers = snowLayers;
         this.blocksForBooster = blocksForBooster;
+        this.spectatorsArea = spectatorsArea;
 
         arenaJoin = Component.text("Вы присоединились к арене " + name).color(NamedTextColor.GRAY);
         arenaLeave = Component.text("Вы покинули арену " + name).color(NamedTextColor.GRAY);
     }
 
     public void join(Player player){
+        if (players.contains(player)) return;
+        addPlayer(player);
 
         if (gameActive || players.size() == maxPlayers){
             player.sendMessage(arenaFull);
@@ -92,49 +114,114 @@ public class Arena {
             return;
         }
 
+        player.showBossBar(lobbyBossbar);
         boosterProgress.put(player, 0);
         boosterBossbars.put(player, BossBar.bossBar(Component.text("Блоков до следующего бустера: ").color(NamedTextColor.YELLOW), 0f, BossBar.Color.YELLOW, BossBar.Overlay.PROGRESS));
+
+        if (players.size() < minPlayers || lobbyTimerStarted) return;
+        startLobbyTimer();
+    }
+    public void leave(Player player){
+        if (isAlive(player)){
+            death(player);
+        }
+        clearPlayer(player);
+        removePlayer(player);
+        player.sendMessage(arenaLeave);
+    }
+
+
+    private void addPlayer(Player player){
         players.add(player);
         player.sendMessage(arenaJoin);
         player.teleport(lobbyLocation);
-
-        if (players.size() < minPlayers || timerStarted) return;
-
-        startLobbyTimer();
     }
-
-    public void leave(Player player){
-        if (!gameActive){
-            clearPlayer(player);
-            boosterProgress.remove(player);
-            boosterBossbars.remove(player);
-            player.sendMessage(arenaLeave);
-            return;
+    private void addAlive(Player player){
+        alive.add(player);
+        player.setGameMode(GameMode.SURVIVAL);
+    }
+    public void becameSpectator(Player player){
+        spectators.add(player);
+        player.setGameMode(GameMode.SPECTATOR);
+        clearPlayer(player);
+    }
+    private void clearPlayer(Player player){
+        Utils.resetExpTimer(player, false);
+        player.getInventory().clear();
+        if (gameActive && boosterBossbars.get(player) != null){
+            player.hideBossBar(boosterBossbars.get(player));
+        } else {
+            player.hideBossBar(lobbyBossbar);
         }
-        death(player);
     }
+    private void removePlayer(Player player){
+        player.teleport(hubLocation);
+        player.setGameMode(GameMode.ADVENTURE);
+        players.remove(player);
+        spectators.remove(player);
+        alive.remove(player);
+        clearPlayer(player);
+    }
+
 
     public void death(Player player){
-        if (!players.contains(player)) return;
-        boosterProgress.remove(player);
-        boosterBossbars.remove(player);
+        if (!isAlive(player)) return;
+
+        alive.remove(player);
         player.sendMessage(loseMessage);
         player.showTitle(Title.title(loseMessage, Component.text("")));
-        if (players.size() > 2) becameSpectator(player);
+
         for (Player p : players){
-            p.sendMessage(Component.text("Игрок " + player.getName() + " выбывает. Осталось игроков: " + players.size()).color(NamedTextColor.RED));
+            if (p.equals(player)) continue;
+            p.sendMessage(Component.text("Игрок " + player.getName() + " выбывает. Осталось игроков: " + alive.size()).color(NamedTextColor.RED));
+        }
+
+        if (alive.size() >= 2) becameSpectator(player);
+    }
+    private void win(Player winner){
+        StatsManager.updateWins(winner.getName());
+        winner.sendMessage(winMessage);
+        winner.showTitle(Title.title(winMessage, Component.text("")));
+
+        for (Player player : players){
+            if (player.equals(winner)) continue;
+            player.sendMessage(Component.text("Победил игрок " + winner.getName()).color(NamedTextColor.YELLOW));
+            player.showTitle(Title.title(Component.text("Победил игрок " + winner.getName()).color(NamedTextColor.YELLOW), Component.text("")));
+        }
+
+        removePlayer(winner);
+        stopGame();
+    }
+    private void spawn(List<Player> players){
+        int playersTeleported = 0;
+
+        // Лопата
+        ItemStack shovel = new ItemStack(Material.DIAMOND_SHOVEL);
+        shovel.addEnchantment(Enchantment.DIG_SPEED, 5);
+        ItemMeta meta = shovel.getItemMeta();
+        meta.setUnbreakable(true);
+        meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES);
+        meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
+        shovel.setItemMeta(meta);
+
+        for (Player player : players) {
+            StatsManager.updateGames(player.getName());
+            addAlive(player);
+            player.teleport(startLocations.get(playersTeleported));
+            player.hideBossBar(lobbyBossbar);
+            player.showBossBar(boosterBossbars.get(player));
+            player.showTitle(Title.title(startGameTitle, startGameSubtitle));
+            player.getInventory().setItemInMainHand(shovel);
+            if (startLocations.size() > 1) playersTeleported++;
         }
     }
 
-    private void win(Player player){
-        StatsManager.updateWins(player.getName());
-        player.sendMessage(winMessage);
-        player.showTitle(Title.title(winMessage, Component.text("")));
-        stopGame();
-    }
+
 
     private void startLobbyTimer(){
-        timerStarted = true;
+        lobbyTimerStarted = true;
+        lobbyBossbar.name(Component.text("Игра скоро начнётся!").color(NamedTextColor.WHITE));
+        lobbyBossbar.color(BossBar.Color.GREEN);
 
         BukkitRunnable countdown = new BukkitRunnable() {
             int count = lobbyTimer;
@@ -144,15 +231,19 @@ public class Arena {
                 Utils.setExpTimer(players, count, lobbyTimer, (count <= 5) );
 
                 if (players.size() < minPlayers){
-                    timerStarted = false;
+                    lobbyTimerStarted = false;
                     Utils.resetExpTimer(players, true);
+                    lobbyBossbar.name(Component.text("Ждём игроков...").color(NamedTextColor.WHITE));
+                    lobbyBossbar.color(BossBar.Color.WHITE);
                     this.cancel();
                     return;
                 }
 
                 if (count == 0){
                     startGame();
-                    timerStarted = false;
+                    lobbyTimerStarted = false;
+                    lobbyBossbar.name(Component.text("Ждём игроков...").color(NamedTextColor.WHITE));
+                    lobbyBossbar.color(BossBar.Color.WHITE);
                     this.cancel();
                     return;
                 }
@@ -166,27 +257,8 @@ public class Arena {
     private void startGame(){
         timesCleared = 0;
         gameActive = true;
-        int playersTeleported = 0;
-        for (Player player : players) {
-            player.teleport(startLocations.get(playersTeleported));
-            player.setGameMode(GameMode.SURVIVAL);
-            player.showBossBar(boosterBossbars.get(player));
-            StatsManager.updateGames(player.getName());
-            player.showTitle(Title.title(startGameTitle, startGameSubtitle));
-            if (startLocations.size() != 1) playersTeleported++;
-        }
 
-        // Лопаты
-        ItemStack shovel = new ItemStack(Material.DIAMOND_SHOVEL);
-        shovel.addEnchantment(Enchantment.DIG_SPEED, 5);
-        ItemMeta meta = shovel.getItemMeta();
-        meta.setUnbreakable(true);
-        meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES);
-        meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
-        shovel.setItemMeta(meta);
-        for (Player player : players){
-            player.getInventory().setItemInMainHand(shovel);
-        }
+        spawn(players);
 
         BukkitRunnable gameCountdown = new BukkitRunnable() {
             int count = maxGameLength;
@@ -195,71 +267,59 @@ public class Arena {
             public void run() {
 
                 Utils.setExpTimer(players, count, maxGameLength, (count < 10) );
-                Utils.setExpTimer(spectators, count, maxGameLength, (count < 10) );
 
                 if (count == (maxGameLength / 3) || count == maxGameLength - (maxGameLength / 3)) reduceFloors();
+                if (count == 0) clearAllLayers();
 
-                if (players.size() == 1){
-                    win(players.get(0));
+                if (alive.size() == 1){
+                    win(alive.get(0));
                     this.cancel();
                     return;
                 }
-
-                if (count <= 0){
+                if (alive.size() == 0){
                     stopGame();
                     this.cancel();
                     return;
                 }
 
-                count -= 1;
+                if (count > 0) count -= 1;
             }
         };
         gameCountdown.runTaskTimer(Spleef.getPlugin(), 0,20);
-
     }
 
     public void stopGame(){
         if (players.size() != 0){
-            for (Player player : players){
-                death(player);
+            for (int i = players.size(); i > 0; i--){
+                Player player = players.get(0);
+                removePlayer(player);
             }
         }
 
         gameActive = false;
         players.clear();
-        boosterProgress.clear();
+        alive.clear();
         spectators.clear();
+        boosterProgress.clear();
         boosterBossbars.clear();
 
-        for (int[] floor : floors) {
+        for (int[] floor : snowLayers) {
             Bukkit.getServer().dispatchCommand(Bukkit.getConsoleSender(), "fill " + floor[0] + " " + floor[1] + " " + floor[2] + " " + floor[3] + " " + floor[4] + " " + floor[5] + " minecraft:snow_block");
         }
     }
 
-    public void becameSpectator(Player player){
-        spectators.add(player);
-        player.setGameMode(GameMode.SPECTATOR);
-    }
 
-    private void clearPlayer(Player player){
-        boosterProgress.remove(player);
-        boosterBossbars.remove(player);
-        Utils.resetExpTimer(player, false);
-        player.setGameMode(GameMode.ADVENTURE);
-        player.teleport(hubLocation);
-        player.getInventory().clear();
-    }
 
     private void reduceFloors(){
-        if (floors.size() == 1) return;
+        if (snowLayers.size() == 1) return;
 
         if (timesCleared == 0){
-            for(int i = 0; i < floors.size() / 2; i++){
-                Bukkit.getServer().dispatchCommand(Bukkit.getConsoleSender(), "fill " + floors.get(i)[0] + " " + floors.get(i)[1] + " " + floors.get(i)[2] + " " + floors.get(i)[3] + " " + floors.get(i)[4] + " " + floors.get(i)[5] + " minecraft:air");
+            for(int i = 0; i < snowLayers.size() / 2; i++){
+                Bukkit.getServer().dispatchCommand(Bukkit.getConsoleSender(), "fill " + snowLayers.get(i)[0] + " " + snowLayers.get(i)[1] + " " + snowLayers.get(i)[2] + " " + snowLayers.get(i)[3] + " " + snowLayers.get(i)[4] + " " + snowLayers.get(i)[5] + " minecraft:air");
             }
         } else if (timesCleared == 1){
-            for(int i = floors.size() / 2; i < floors.size() - 1; i++){
-                Bukkit.getServer().dispatchCommand(Bukkit.getConsoleSender(), "fill " + floors.get(i)[0] + " " + floors.get(i)[1] + " " + floors.get(i)[2] + " " + floors.get(i)[3] + " " + floors.get(i)[4] + " " + floors.get(i)[5] + " minecraft:air");
+            for(int i = snowLayers.size() / 2; i < snowLayers.size() - 1; i++){
+                Bukkit.getServer().dispatchCommand(Bukkit.getConsoleSender(), "fill " + snowLayers.get(i)[0] + " " + snowLayers.get(i)[1] + " " + snowLayers.get(i)[2] + " " + snowLayers.get(i)[3] + " " + snowLayers.get(i)[4] + " " + snowLayers.get(i)[5] + " minecraft:air");
             }
         } else {
             return;
@@ -268,19 +328,28 @@ public class Arena {
         timesCleared++;
     }
 
+    private void clearAllLayers(){
+        for(int[] layer : snowLayers){
+            Bukkit.getServer().dispatchCommand(Bukkit.getConsoleSender(), "fill " + layer[0] + " " + layer[1] + " " + layer[2] + " " + layer[3] + " " + layer[4] + " " + layer[5] + " minecraft:air");
+        }
+    }
+
     public void snowBlockBroken(Player player){
         StatsManager.updateBlocksBroken(player.getName());
 
-        boosterBossbars.replace(player, BossBar.bossBar(Component.text("Блоков до следующего бустера: " + boosterProgress.get(player)).color(NamedTextColor.YELLOW),
-                (float) (boosterProgress.get(player) + 1) / blocksForBooster, BossBar.Color.YELLOW, BossBar.Overlay.PROGRESS));
+        BossBar bossBar = boosterBossbars.get(player);
 
         if (boosterProgress.get(player) + 1 == blocksForBooster){
             boosterProgress.replace(player, 0);
+            bossBar.name(Component.text("Блоков до следующего бустера: " + blocksForBooster).color(NamedTextColor.YELLOW));
+            bossBar.progress(0f);
             giveBooster(player);
             return;
         }
-        boosterProgress.replace(player, boosterProgress.get(player) + 1);
 
+        boosterProgress.replace(player, boosterProgress.get(player) + 1);
+        bossBar.name(Component.text("Блоков до следующего бустера: " + (blocksForBooster - boosterProgress.get(player))).color(NamedTextColor.YELLOW));
+        bossBar.progress((float) (boosterProgress.get(player)) / blocksForBooster);
     }
 
     private void giveBooster(Player player){
@@ -289,7 +358,9 @@ public class Arena {
         player.playSound(player, Sound.ENTITY_EXPERIENCE_ORB_PICKUP, SoundCategory.AMBIENT, 100, 1);
 
         // Снежок
-        if (rnd >= 66){
+        if (rnd >= 50){
+            player.sendMessage(Component.text("Вы получили бустер: Очищающий снежок!").color(NamedTextColor.YELLOW));
+            player.sendActionBar(Component.text("Бустер: Очищающий снежок!").color(NamedTextColor.YELLOW));
             ItemStack snowball = new ItemStack(Material.SNOWBALL);
             ItemMeta meta = snowball.getItemMeta();
             meta.displayName(Component.text("Очищающий снежок").color(NamedTextColor.YELLOW));
@@ -297,15 +368,17 @@ public class Arena {
             player.getInventory().addItem(snowball);
         }
         // Супер-лопата
-        else if (rnd >= 33){
+        else if (rnd >= 15){
+            player.sendMessage(Component.text("Вы получили бустер: Супер-лопата!").color(NamedTextColor.YELLOW));
+            player.sendActionBar(Component.text("Бустер: Супер-лопата!").color(NamedTextColor.YELLOW));
             ItemStack superShovel = new ItemStack(Material.GOLDEN_SHOVEL);
+            superShovel.addEnchantment(Enchantment.DIG_SPEED, 3);
             ItemMeta meta = superShovel.getItemMeta();
             meta.setUnbreakable(true);
             meta.displayName(Component.text("Супер-лопата").color(NamedTextColor.YELLOW));
-            superShovel.addEnchantment(Enchantment.DIG_SPEED, 3);
             superShovel.setItemMeta(meta);
             for (int i = 0; i < player.getInventory().getSize(); i++){
-                if (player.getInventory().getItem(i) != null && !player.getInventory().getItem(i).getType().equals(Material.DIAMOND_SHOVEL)) continue;
+                if (player.getInventory().getItem(i) == null || !player.getInventory().getItem(i).getType().equals(Material.DIAMOND_SHOVEL)) continue;
                 player.getInventory().setItem(i, superShovel);
                 break;
             }
@@ -318,22 +391,30 @@ public class Arena {
                     }
 
                     for (int i = 0; i < player.getInventory().getSize(); i++){
-                        if (player.getInventory().getItem(i) != null && !player.getInventory().getItem(i).getType().equals(Material.GOLDEN_SHOVEL)) continue;
+                        if (player.getInventory().getItem(i) == null || !player.getInventory().getItem(i).getType().equals(Material.GOLDEN_SHOVEL)) continue;
                         ItemStack shovel = new ItemStack(Material.DIAMOND_SHOVEL);
                         shovel.addEnchantment(Enchantment.DIG_SPEED, 5);
                         ItemMeta meta = shovel.getItemMeta();
                         meta.setUnbreakable(true);
+                        meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES);
+                        meta.addItemFlags(ItemFlag.HIDE_ENCHANTS);
                         shovel.setItemMeta(meta);
                         player.getInventory().setItem(i, shovel);
-                        break;
+                        return;
                     }
                 }
             };
-            shovelTimer.runTaskLater(plugin, 20 * 10);
+            shovelTimer.runTaskLater(plugin, 20 * 5);
         }
         // Невидимость
         else {
-            player.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, 20 * 10, 1, false, false));
+            player.sendMessage(Component.text("Вы получили бустер: Невидимость!").color(NamedTextColor.YELLOW));
+            player.sendActionBar(Component.text("Бустер: Невидимость!").color(NamedTextColor.YELLOW));
+            player.addPotionEffect(new PotionEffect(PotionEffectType.INVISIBILITY, 20 * 10, 0, false, false));
         }
+    }
+
+    private boolean isAlive(Player player){
+        return alive.contains(player);
     }
 }

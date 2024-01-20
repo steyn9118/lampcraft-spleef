@@ -1,8 +1,12 @@
 package spleef.spleef;
 
+import org.bukkit.Material;
 import org.bukkit.Sound;
 import org.bukkit.SoundCategory;
+import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
+import org.bukkit.util.BoundingBox;
+import spleef.spleef.stats.StatsManager;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -44,5 +48,26 @@ public class Utils {
         players.add(player);
         if (toFull) setExpTimer(players, 0, 0, false);
         else setExpTimer(players, 0, 1, false);
+    }
+
+    public static void replaceCubeOfBlocks(Block center, int sideAddition, Player player){
+        int xIncrement;
+        if ((center.getX() - 1) - (center.getX() + 1) < 0) xIncrement = 1;
+        else xIncrement = -1;
+        int zIncrement;
+        if ((center.getZ() - 1) - (center.getZ() + 1) < 0) zIncrement = 1;
+        else zIncrement = -1;
+
+        for (int x = center.getX() - sideAddition; x <= center.getX() + sideAddition; x += xIncrement){
+            for (int y = center.getY() - sideAddition; y <= center.getY() + sideAddition; y++){
+                for (int z = center.getZ() - sideAddition; z <= center.getZ() + sideAddition; z += zIncrement){
+                    Block replacingBlock = center.getLocation().getWorld().getBlockAt(x, y, z);
+                    boolean isSnowBlock = replacingBlock.getType().equals(Material.SNOW_BLOCK);
+                    if (!isSnowBlock) continue;
+                    if (player != null) StatsManager.updateBlocksBroken(player.getName());
+                    replacingBlock.setType(Material.AIR);
+                }
+            }
+        }
     }
 }

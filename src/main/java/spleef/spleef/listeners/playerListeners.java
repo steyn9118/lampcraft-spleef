@@ -6,6 +6,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.event.entity.ProjectileHitEvent;
 import org.bukkit.event.player.PlayerMoveEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import spleef.spleef.Arena;
@@ -15,19 +16,32 @@ public class playerListeners implements Listener {
 
     @EventHandler
     public void onPlayerMovementEvent(PlayerMoveEvent event){
-        if (Utils.getArenaByPlayer(event.getPlayer()) != null && Utils.getArenaByPlayer(event.getPlayer()).getMinY() >= event.getPlayer().getLocation().getBlockY())
-            Utils.getArenaByPlayer(event.getPlayer()).death(event.getPlayer());
+        Player player = event.getPlayer();
+        Arena arena = Utils.getArenaByPlayer(player);
+        if (arena == null) return;
+        if (!arena.isGameActive()) return;
+
+        boolean playerIsLowerThenMinY = arena.getMinY() >= player.getLocation().getBlockY();
+        if (playerIsLowerThenMinY) arena.death(player);
+
+        boolean isSpectator = arena.getSpectators().contains(player);
+        boolean spectatorOutOfBounds = !arena.getSpectatorsArea().contains(player.getLocation().getX(), player.getLocation().getY(), player.getLocation().getZ());
+        if (isSpectator && spectatorOutOfBounds) player.teleport(arena.getSpectatorsSpawnLocation());
+
     }
 
     @EventHandler
     public void onPlayerLeaveEvent(PlayerQuitEvent event){
-        if (Utils.getArenaByPlayer(event.getPlayer()) == null) return;
-        Utils.getArenaByPlayer(event.getPlayer()).leave(event.getPlayer());
+        Player player = event.getPlayer();
+        Arena arena = Utils.getArenaByPlayer(event.getPlayer());
+        if (arena == null) return;
+        arena.leave(player);
     }
 
     @EventHandler
     public void blockBreak(BlockBreakEvent event){
-        Arena arena = Utils.getArenaByPlayer(event.getPlayer());
+        Player player = event.getPlayer();
+        Arena arena = Utils.getArenaByPlayer(player);
         if (arena == null) return;
 
         Block brokenBlock = event.getBlock();
@@ -36,19 +50,25 @@ public class playerListeners implements Listener {
             event.setCancelled(true);
             return;
         }
-        arena.snowBlockBroken(event.getPlayer());
-
-        Player player = event.getPlayer();
+        arena.snowBlockBroken(player);
+        
         boolean hasSuperShovel = player.getInventory().getItemInMainHand().getType().equals(Material.GOLDEN_SHOVEL);
         if (!hasSuperShovel) return;
-        for (int x = brokenBlock.getX() - 1; x <= brokenBlock.getX() + 1; x++){
-            for (int y = brokenBlock.getY() - 1; y <= brokenBlock.getY() + 1; y++){
-                for (int z = brokenBlock.getZ() - 1; z <= brokenBlock.getZ() + 1; z++){
-                    boolean isSnowBlock = player.getLocation().getWorld().getBlockAt(x, y, z).getType().equals(Material.SNOW_BLOCK);
-                    if (!isSnowBlock) return;
-                    player.getLocation().getWorld().getBlockAt(x, y, z).setType(Material.AIR);
-                }
-            }
-        }
+        Utils.replaceCubeOfBlocks(brokenBlock, 1, player);
+    }
+
+    @EventHandler
+    public void onProjectileHit(ProjectileHitEvent event){
+        boolean isThrownByPlayer = event.getEntity().getShooter() instanceof Player;
+        Block hitBlock = event.getHitBlock();
+        if(!isThrownByPlayer) return;
+
+        Player player = (Player) event.getEntity().getShooter();
+        Arena arena = Utils.getArenaByPlayer(player);
+        if (arena == null) return;
+
+        if (hitBlock == null){
+            Utils.replaceCubeOfBlocks(player.getWorld().getBlockAt(event.getHitEntity().getLocation()), 1, player);
+        } else Utils.replaceCubeOfBlocks(event.getHitBlock(), 1, null);
     }
 }
